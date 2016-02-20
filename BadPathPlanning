@@ -1,0 +1,512 @@
+clf;        %clears figures
+clc;        %clears console
+clear;      %clears workspace
+close all;
+clear all;
+axis equal; %keeps the x and y scale the same
+map=[0,0;60,0;60,45;45,45;45,59;106,59;106,105;0,105];  %default map
+botSim = BotSim(map);  %sets up a botSim object a map, and debug mode on.
+
+disp('You can use the pointInsideMap() function to sample the map vectors');
+disp('to make a grid representation of the map for pathfinding');
+
+hold on;
+botSim.drawMap();
+
+limsMin = min(map); % minimum limits of the map
+limsMax = max(map); % maximum limits of the map
+dims = limsMax-limsMin; %dimension of the map
+res = 5; %sampling resouloution in cm
+iterators = dims/res;
+iterators = ceil(iterators)+[2 2]; %to counteract 1 based indexing + 1
+mapArray = zeros(iterators); %preallocate for speed
+
+%loops through the grid indexes and tests if they are inside the map
+figure(1);
+hold on
+for i = 1:iterators(2)
+    for j = 1:iterators(1)
+        testPos = limsMin + [j-1 i-1]*res; %to counteract 1 based indexing
+        %notice, that i and j have also been swapped here so that the only
+        %thing left to do is invert the y axis. 
+        mapArray(i,j) = botSim.pointInsideMap(testPos);
+        if mapArray(i,j)
+            plot(testPos(1),testPos(2),'*');%inside map
+        else
+            plot(testPos(1),testPos(2),'o');%outside map
+        end
+    end
+end
+
+%prints array of samplePoints. 
+disp('This naive implementation does not return the map in the same'); 
+disp('orientation as plotted map.  Here the y axis is inverted')
+mapArray
+
+for x = 1:iterators(1)
+    thickness = 0;
+    for y = 1:iterators(2)
+        if mapArray( x, y )
+            thickness = thickness + 1;
+            if thickness == 1
+                yFirstLayer = y;
+            elseif thickness == 2
+                ySecondLayer = y;
+            end
+        else
+            if thickness == 1
+                mapArray( x, yFirstLayer ) = 0;
+            elseif thickness > 1
+                mapArray( x, yFirstLayer ) = 0;
+                mapArray( x, ySecondLayer ) = 0;
+            end
+            thickness = 0;
+        end
+    end
+end
+for x = 1:iterators(1)
+    thickness = 0;
+    for y = iterators(2):-1:1
+        if mapArray( x, y )
+            thickness = thickness + 1;
+            if thickness == 1
+                yFirstLayer = y;
+            elseif thickness == 2
+                ySecondLayer = y;
+            end
+        else
+            if thickness == 1
+                mapArray( x, yFirstLayer ) = 0;
+            elseif thickness > 1
+                mapArray( x, yFirstLayer ) = 0;
+                mapArray( x, ySecondLayer ) = 0;
+            end
+            thickness = 0;
+        end
+    end
+end
+for y = 1:iterators(2)
+    thickness = 0;
+    for x = 1:iterators(1)
+        if mapArray( x, y )
+            thickness = thickness + 1;
+            if thickness == 1
+                xFirstLayer = x;
+            elseif thickness == 2
+                xSecondLayer = x;
+            end
+        else
+            if thickness == 1
+                mapArray( xFirstLayer, y ) = 0;
+            elseif thickness > 1
+                mapArray( xFirstLayer, y ) = 0;
+                mapArray( xSecondLayer, y ) = 0;
+            end
+            thickness = 0;
+        end
+    end
+end
+for y = 1:iterators(2)
+    thickness = 0;
+    for x = iterators(1):-1:1
+        if mapArray( x, y )
+            thickness = thickness + 1;
+            if thickness == 1
+                xFirstLayer = x;
+            elseif thickness == 2
+                xSecondLayer = x;
+            end
+        else
+            if thickness == 1
+                mapArray( xFirstLayer, y ) = 0;
+            elseif thickness > 1
+                mapArray( xFirstLayer, y ) = 0;
+                mapArray( xSecondLayer, y ) = 0;
+            end
+            thickness = 0;
+        end
+    end
+end
+
+mapArray
+
+figure(2);
+hold on;
+botSim.drawMap();
+axis equal; %keeps the x and y scale the same
+for i = 1:iterators(2)
+    for j = 1:iterators(1)
+        testPos = limsMin + [j-1 i-1]*res; %to counteract 1 based indexing
+        %notice, that i and j have also been swapped here so that the only
+        %thing left to do is invert the y axis. 
+        %mapArray(i,j) = botSim.pointInsideMap(testPos);
+        if mapArray(i,j)
+            plot(testPos(1),testPos(2),'*');%inside map
+        else
+            plot(testPos(1),testPos(2),'o');%outside map
+        end
+    end
+end
+
+xStartRaw = 10;
+yStartRaw = 25;
+xTargetRaw = 80;
+yTargetRaw = 80;
+
+xStart = ceil(xStartRaw/5);
+yStart = ceil(yStartRaw/5);
+xTarget = ceil(xTargetRaw/5);
+yTarget = ceil(yTargetRaw/5);
+OPEN = zeros( iterators(1), iterators(2) ); % The set of nodes to be evaluated
+CLOSED = zeros( iterators(1), iterators(2) ); % The set of nodes have already been evaluated
+hCost = zeros( iterators(1), iterators(2) );
+gCost = zeros( iterators(1), iterators(2) );
+fCost = zeros( iterators(1), iterators(2) );
+parent = zeros( iterators(1), iterators(2), 2 );
+
+% if ~botSim.pointInsideMap( xStart, yStart )
+%     if ~botSim.pointInsideMap( xTarget, yTarget )
+%         disp('Starting point and target point are not in the map!');
+%     end
+%     disp('Starting point is not in the map!');
+% elseif ~botSim.pointInsideMap( xTarget, yTarget )
+%     disp('Target point is not in the map!');
+% else
+%     if ~mapArray( xStart, yStart )
+%         if mapArray( xStart - 1, yStart - 1 )
+%             xStart = xStart - 1;
+%             yStart = yStart - 1;
+%         elseif mapArray( xStart - 1, yStart )
+%             xStart = xStart - 1;
+%         elseif mapArray( xStart - 1, yStart + 1 )
+%             xStart = xStart - 1;
+%             yStart = yStart + 1;
+%         elseif mapArray( xStart, yStart - 1 )
+%             yStart = yStart - 1;
+%         elseif mapArray( xStart, yStart + 1 )
+%             yStart = yStart + 1;
+%         elseif mapArray( xStart + 1, yStart - 1 )
+%             xStart = xStart + 1;
+%             yStart = yStart - 1;
+%         elseif mapArray( xStart + 1, yStart )
+%             xStart = xStart + 1;
+%         elseif mapArray( xStart + 1, yStart + 1 )
+%             xStart = xStart + 1;
+%             yStart = yStart + 1;
+%         end
+%     end
+%     if ~mapArray( xTarget, yTarget )
+%         if mapArray( xTarget - 1, yTarget - 1 )
+%             xTarget = xTarget - 1;
+%             yTarget = yTarget - 1;
+%         elseif mapArray( xTarget - 1, yTarget )
+%             xTarget = xTarget - 1;
+%         elseif mapArray( xTarget - 1, yTarget + 1 )
+%             xTarget = xTarget - 1;
+%             yTarget = yTarget + 1;
+%         elseif mapArray( xTarget, yTarget - 1 )
+%             yTarget = yTarget - 1;
+%         elseif mapArray( xTarget, yTarget + 1 )
+%             yTarget = yTarget + 1;
+%         elseif mapArray( xTarget + 1, yTarget - 1 )
+%             xTarget = xTarget + 1;
+%             yTarget = yTarget - 1;
+%         elseif mapArray( xTarget + 1, yTarget )
+%             xTarget = xTarget + 1;
+%         elseif mapArray( xTarget + 1, yTarget + 1 )
+%             xTarget = xTarget + 1;
+%             yTarget = yTarget + 1;
+%         end
+%     end
+% end
+
+% for x = 1:iterators(1)
+%     for y = 1:iterators(2)
+%         hCost( x, y ) = h( x, y, xTarget, yTarget );
+%         gCost( x, y ) = g( x, y, xStart, yStart );
+%         fCost( x, y ) = hCost( x, y ) + gCost( x, y );
+%     end
+% end
+
+for x = 1:iterators(1)
+    for y = 1:iterators(2)
+        if ~mapArray( x, y )
+            CLOSED( x, y ) = 1;
+        end
+    end
+end
+
+
+finish = 1; % Should the loop finish: 1 for continue, 0 for end
+xCurrent = xStart; % The current node being processed
+yCurrent = yStart;
+gCost( xCurrent, yCurrent ) = 0;
+if ~CLOSED( xCurrent - 1, yCurrent - 1 ) && ~OPEN( xCurrent - 1, yCurrent - 1 )
+    gCost( xCurrent - 1, yCurrent - 1 ) = 707;
+    hCost( xCurrent - 1, yCurrent - 1 ) = h( xCurrent - 1, yCurrent - 1, xTarget, yTarget );
+    fCost( xCurrent - 1, yCurrent - 1 ) = gCost( xCurrent - 1, yCurrent - 1 ) + hCost( xCurrent - 1, yCurrent - 1 );
+    parent( xCurrent - 1, yCurrent - 1, 1 ) = xCurrent;
+    parent( xCurrent - 1, yCurrent - 1, 2 ) = yCurrent;
+    OPEN( xCurrent - 1, yCurrent - 1 ) = 1;
+end
+if ~CLOSED( xCurrent - 1, yCurrent ) && ~OPEN( xCurrent - 1, yCurrent )
+        gCost( xCurrent - 1, yCurrent ) = 500;
+        hCost( xCurrent - 1, yCurrent ) = h( xCurrent - 1, yCurrent, xTarget, yTarget );
+        fCost( xCurrent - 1, yCurrent ) = gCost( xCurrent - 1, yCurrent ) + hCost( xCurrent - 1, yCurrent );
+        parent( xCurrent - 1, yCurrent, 1 ) = xCurrent;
+        parent( xCurrent - 1, yCurrent, 2 ) = yCurrent;
+        OPEN( xCurrent - 1, yCurrent ) = 1;
+end
+if ~CLOSED( xCurrent - 1, yCurrent + 1 ) && ~OPEN( xCurrent - 1, yCurrent + 1 )
+        gCost( xCurrent - 1, yCurrent + 1 ) = 707;
+        hCost( xCurrent - 1, yCurrent + 1 ) = h( xCurrent - 1, yCurrent + 1, xTarget, yTarget );
+        fCost( xCurrent - 1, yCurrent + 1 ) = gCost( xCurrent - 1, yCurrent + 1 ) + hCost( xCurrent - 1, yCurrent + 1 );
+        parent( xCurrent - 1, yCurrent + 1, 1 ) = xCurrent;
+        parent( xCurrent - 1, yCurrent + 1, 2 ) = yCurrent;
+        OPEN( xCurrent - 1, yCurrent + 1 ) = 1;
+end
+if ~CLOSED( xCurrent, yCurrent - 1 ) && ~OPEN( xCurrent, yCurrent - 1 )
+        gCost( xCurrent, yCurrent - 1 ) = 500;
+        hCost( xCurrent, yCurrent - 1 ) = h( xCurrent, yCurrent - 1, xTarget, yTarget );
+        fCost( xCurrent, yCurrent - 1 ) = gCost( xCurrent, yCurrent - 1 ) + hCost( xCurrent, yCurrent - 1 );
+        parent( xCurrent, yCurrent - 1, 1 ) = xCurrent;
+        parent( xCurrent, yCurrent - 1, 2 ) = yCurrent;
+        OPEN( xCurrent, yCurrent - 1 ) = 1;
+end
+if ~CLOSED( xCurrent, yCurrent + 1 ) && ~OPEN( xCurrent, yCurrent + 1 )
+        gCost( xCurrent, yCurrent + 1 ) = 500;
+        hCost( xCurrent, yCurrent + 1 ) = h( xCurrent, yCurrent + 1, xTarget, yTarget );
+        fCost( xCurrent, yCurrent + 1 ) = gCost( xCurrent, yCurrent + 1 ) + hCost( xCurrent, yCurrent + 1 );
+        parent( xCurrent, yCurrent + 1, 1 ) = xCurrent;
+        parent( xCurrent, yCurrent + 1, 2 ) = yCurrent;
+        OPEN( xCurrent, yCurrent + 1 ) = 1;
+end
+if ~CLOSED( xCurrent + 1, yCurrent - 1 ) && ~OPEN( xCurrent + 1, yCurrent - 1 )
+        gCost( xCurrent + 1, yCurrent - 1 ) = 707;
+        hCost( xCurrent + 1, yCurrent - 1 ) = h( xCurrent + 1, yCurrent - 1, xTarget, yTarget );
+        fCost( xCurrent + 1, yCurrent - 1 ) = gCost( xCurrent + 1, yCurrent - 1 ) + hCost( xCurrent + 1, yCurrent - 1 );
+        parent( xCurrent + 1, yCurrent - 1, 1 ) = xCurrent;
+        parent( xCurrent + 1, yCurrent - 1, 2 ) = yCurrent;
+        OPEN( xCurrent + 1, yCurrent - 1 ) = 1;
+end
+if ~CLOSED( xCurrent + 1, yCurrent ) && ~OPEN( xCurrent + 1, yCurrent )
+        gCost( xCurrent + 1, yCurrent ) = 500;
+        hCost( xCurrent + 1, yCurrent ) = h( xCurrent + 1, yCurrent, xTarget, yTarget );
+        fCost( xCurrent + 1, yCurrent ) = gCost( xCurrent + 1, yCurrent ) + hCost( xCurrent + 1, yCurrent );
+        parent( xCurrent + 1, yCurrent, 1 ) = xCurrent;
+        parent( xCurrent + 1, yCurrent, 2 ) = yCurrent;
+        OPEN( xCurrent + 1, yCurrent ) = 1;
+end
+if ~CLOSED( xCurrent + 1, yCurrent + 1 ) && ~OPEN( xCurrent + 1, yCurrent + 1 )
+        gCost( xCurrent + 1, yCurrent + 1 ) = 707;
+        hCost( xCurrent + 1, yCurrent + 1 ) = h( xCurrent + 1, yCurrent + 1, xTarget, yTarget );
+        fCost( xCurrent + 1, yCurrent + 1 ) = gCost( xCurrent + 1, yCurrent + 1 ) + hCost( xCurrent + 1, yCurrent + 1 );
+        parent( xCurrent + 1, yCurrent + 1, 1 ) = xCurrent;
+        parent( xCurrent + 1, yCurrent + 1, 2 ) = yCurrent;
+        OPEN( xCurrent + 1, yCurrent + 1 ) = 1;
+end
+
+fCostMin = max( max( OPEN ) ); % Initialise the minimum f cost
+for x = 1:iterators(1)
+    for y = 1:iterators(2)
+        if ~OPEN( x, y ) && fCostMin >  fCost( x, y )
+            fCostMin = fCost( x, y );
+            xCurrent = x;
+            yCurrent = y;
+            OPEN( x, y ) = 0;
+            CLOSED( x, y ) = 1;
+        end
+    end
+end
+
+while finish
+    if xCurrent - 1 > 0
+        if yCurrent - 1 > 0
+            if ~CLOSED( xCurrent - 1, yCurrent - 1 )
+                if ~OPEN( xCurrent - 1, yCurrent - 1 )
+                    gCost( xCurrent - 1, yCurrent - 1 ) = 707 + g( xCurrent, yCurrent);
+                    hCost( xCurrent - 1, yCurrent - 1 ) = h( xCurrent - 1, yCurrent - 1, xTarget, yTarget );
+                    fCost( xCurrent - 1, yCurrent - 1 ) = gCost( xCurrent - 1, yCurrent - 1 ) + hCost( xCurrent - 1, yCurrent - 1 );
+                    parent( xCurrent - 1, yCurrent - 1, 1 ) = xCurrent;
+                    parent( xCurrent - 1, yCurrent - 1, 2 ) = yCurrent;
+                    OPEN( xCurrent - 1, yCurrent - 1 ) = 1;
+                elseif ( 707 + g( xCurrent, yCurrent) ) < g( xCurrent - 1, yCurrent - 1 )
+                    gCost( xCurrent - 1, yCurrent - 1 ) = 707 + g( xCurrent, yCurrent);
+                    fCost( xCurrent - 1, yCurrent - 1 ) = gCost( xCurrent - 1, yCurrent - 1 ) + hCost( xCurrent - 1, yCurrent - 1 );
+                    parent( xCurrent - 1, yCurrent - 1, 1 ) = xCurrent;
+                    parent( xCurrent - 1, yCurrent - 1, 2 ) = yCurrent;
+                end
+            end
+        end
+        if ~CLOSED( xCurrent - 1, yCurrent )
+            if ~OPEN( xCurrent - 1, yCurrent )
+                gCost( xCurrent - 1, yCurrent ) = 500 + g( xCurrent, yCurrent);
+                hCost( xCurrent - 1, yCurrent ) = h( xCurrent - 1, yCurrent, xTarget, yTarget );
+                fCost( xCurrent - 1, yCurrent ) = gCost( xCurrent - 1, yCurrent ) + hCost( xCurrent - 1, yCurrent );
+                parent( xCurrent - 1, yCurrent, 1 ) = xCurrent;
+                parent( xCurrent - 1, yCurrent, 2 ) = yCurrent;
+                OPEN( xCurrent - 1, yCurrent ) = 1;
+            elseif ( 500 + g( xCurrent, yCurrent) ) < g( xCurrent - 1, yCurrent )
+                gCost( xCurrent - 1, yCurrent ) = 500 + g( xCurrent, yCurrent);
+                fCost( xCurrent - 1, yCurrent  ) = gCost( xCurrent - 1, yCurrent ) + hCost( xCurrent - 1, yCurrent );
+                parent( xCurrent - 1, yCurrent, 1 ) = xCurrent;
+                parent( xCurrent - 1, yCurrent, 2 ) = yCurrent;
+            end
+        end
+    end
+    if yCurrent + 1 <= iterators(2) && xCurrent - 1 > 0
+        if ~CLOSED( xCurrent - 1, yCurrent + 1 )
+            if ~OPEN( xCurrent - 1, yCurrent + 1 )
+                gCost( xCurrent - 1, yCurrent + 1 ) = 707 + g( xCurrent, yCurrent);
+                hCost( xCurrent - 1, yCurrent + 1 ) = h( xCurrent - 1, yCurrent + 1, xTarget, yTarget );
+                fCost( xCurrent - 1, yCurrent + 1 ) = gCost( xCurrent - 1, yCurrent + 1 ) + hCost( xCurrent - 1, yCurrent + 1 );
+                parent( xCurrent - 1, yCurrent + 1, 1 ) = xCurrent;
+                parent( xCurrent - 1, yCurrent + 1, 2 ) = yCurrent;
+                OPEN( xCurrent - 1, yCurrent + 1 ) = 1;
+            elseif ( 707 + g( xCurrent, yCurrent) ) < g( xCurrent - 1, yCurrent + 1 )
+                gCost( xCurrent - 1, yCurrent + 1 ) = 707 + g( xCurrent, yCurrent);
+                fCost( xCurrent - 1, yCurrent + 1 ) = gCost( xCurrent - 1, yCurrent + 1 ) + hCost( xCurrent - 1, yCurrent + 1 );
+                parent( xCurrent - 1, yCurrent + 1, 1 ) = xCurrent;
+                parent( xCurrent - 1, yCurrent + 1, 2 ) = yCurrent;
+            end
+        end
+    end
+    if yCurrent - 1 > 0
+        if ~CLOSED( xCurrent, yCurrent - 1 )
+            if ~OPEN( xCurrent, yCurrent - 1 )
+                gCost( xCurrent, yCurrent - 1 ) = 500 + g( xCurrent, yCurrent);
+                hCost( xCurrent, yCurrent - 1 ) = h( xCurrent, yCurrent - 1, xTarget, yTarget );
+                fCost( xCurrent, yCurrent - 1 ) = gCost( xCurrent, yCurrent - 1 ) + hCost( xCurrent, yCurrent - 1 );
+                parent( xCurrent, yCurrent - 1, 1 ) = xCurrent;
+                parent( xCurrent, yCurrent - 1, 2 ) = yCurrent;
+                OPEN( xCurrent, yCurrent - 1 ) = 1;
+            elseif ( 500 + g( xCurrent, yCurrent) ) < g( xCurrent, yCurrent - 1 )
+                gCost( xCurrent, yCurrent - 1 ) = 500 + g( xCurrent, yCurrent);
+                fCost( xCurrent, yCurrent - 1 ) = gCost( xCurrent, yCurrent - 1 ) + hCost( xCurrent, yCurrent - 1 );
+                parent( xCurrent, yCurrent - 1, 1 ) = xCurrent;
+                parent( xCurrent, yCurrent - 1, 2 ) = yCurrent;
+            end
+        end
+    end
+    if yCurrent + 1 <= iterators(2)
+        if ~CLOSED( xCurrent, yCurrent + 1 )
+            if ~OPEN( xCurrent, yCurrent + 1 )
+                gCost( xCurrent, yCurrent + 1 ) = 500 + g( xCurrent, yCurrent);
+                hCost( xCurrent, yCurrent + 1 ) = h( xCurrent, yCurrent + 1, xTarget, yTarget );
+                fCost( xCurrent, yCurrent + 1 ) = gCost( xCurrent, yCurrent + 1 ) + hCost( xCurrent, yCurrent + 1 );
+                parent( xCurrent, yCurrent + 1, 1 ) = xCurrent;
+                parent( xCurrent, yCurrent + 1, 2 ) = yCurrent;
+                OPEN( xCurrent, yCurrent + 1 ) = 1;
+            elseif ( 500 + g( xCurrent, yCurrent) ) < g( xCurrent, yCurrent + 1 )
+                gCost( xCurrent, yCurrent + 1 ) = 500 + g( xCurrent, yCurrent);
+                fCost( xCurrent, yCurrent + 1 ) = gCost( xCurrent, yCurrent + 1 ) + hCost( xCurrent, yCurrent + 1 );
+                parent( xCurrent, yCurrent + 1, 1 ) = xCurrent;
+                parent( xCurrent, yCurrent + 1, 2 ) = yCurrent;
+            end
+        end
+    end
+    if xCurrent + 1 <= iterators(1)
+        if yCurrent - 1 > 0
+            if ~CLOSED( xCurrent + 1, yCurrent - 1 )
+                if ~OPEN( xCurrent + 1, yCurrent - 1 )
+                    gCost( xCurrent + 1, yCurrent - 1 ) = 707 + g( xCurrent, yCurrent);
+                    hCost( xCurrent + 1, yCurrent - 1 ) = h( xCurrent + 1, yCurrent - 1, xTarget, yTarget );
+                    fCost( xCurrent + 1, yCurrent - 1 ) = gCost( xCurrent + 1, yCurrent - 1 ) + hCost( xCurrent + 1, yCurrent - 1 );
+                    parent( xCurrent + 1, yCurrent - 1, 1 ) = xCurrent;
+                    parent( xCurrent + 1, yCurrent - 1, 2 ) = yCurrent;
+                    OPEN( xCurrent + 1, yCurrent - 1 ) = 1;
+                elseif ( 707 + g( xCurrent, yCurrent) ) < g( xCurrent + 1, yCurrent - 1 )
+                    gCost( xCurrent + 1, yCurrent - 1 ) = 707 + g( xCurrent, yCurrent);
+                    fCost( xCurrent + 1, yCurrent - 1 ) = gCost( xCurrent + 1, yCurrent - 1 ) + hCost( xCurrent + 1, yCurrent - 1 );
+                    parent( xCurrent + 1, yCurrent - 1, 1 ) = xCurrent;
+                    parent( xCurrent + 1, yCurrent - 1, 2 ) = yCurrent;
+                end
+            end
+        end
+        if ~CLOSED( xCurrent + 1, yCurrent )
+            if ~OPEN( xCurrent + 1, yCurrent )
+                gCost( xCurrent + 1, yCurrent ) = 500 + g( xCurrent, yCurrent);
+                hCost( xCurrent + 1, yCurrent ) = h( xCurrent + 1, yCurrent, xTarget, yTarget );
+                fCost( xCurrent + 1, yCurrent ) = gCost( xCurrent + 1, yCurrent ) + hCost( xCurrent + 1, yCurrent );
+                parent( xCurrent + 1, yCurrent, 1 ) = xCurrent;
+                parent( xCurrent + 1, yCurrent, 2 ) = yCurrent;
+                OPEN( xCurrent + 1, yCurrent ) = 1;
+            elseif ( 500 + g( xCurrent, yCurrent) ) < g( xCurrent + 1, yCurrent )
+                gCost( xCurrent + 1, yCurrent ) = 500 + g( xCurrent, yCurrent);
+                fCost( xCurrent + 1, yCurrent  ) = gCost( xCurrent + 1, yCurrent ) + hCost( xCurrent + 1, yCurrent );
+                parent( xCurrent + 1, yCurrent, 1 ) = xCurrent;
+                parent( xCurrent + 1, yCurrent, 2 ) = yCurrent;
+            end
+        end
+        if yCurrent + 1 < iterators(2)
+            if ~CLOSED( xCurrent + 1, yCurrent + 1 )
+                if ~OPEN( xCurrent + 1, yCurrent + 1 )
+                    gCost( xCurrent + 1, yCurrent + 1 ) = 707 + g( xCurrent, yCurrent);
+                    hCost( xCurrent + 1, yCurrent + 1 ) = h( xCurrent + 1, yCurrent + 1, xTarget, yTarget );
+                    fCost( xCurrent + 1, yCurrent + 1 ) = gCost( xCurrent + 1, yCurrent + 1 ) + hCost( xCurrent + 1, yCurrent + 1 );
+                    parent( xCurrent + 1, yCurrent + 1, 1 ) = xCurrent;
+                    parent( xCurrent + 1, yCurrent + 1, 2 ) = yCurrent;
+                    OPEN( xCurrent + 1, yCurrent + 1 ) = 1;
+                elseif ( 707 + g( xCurrent, yCurrent) ) < g( xCurrent + 1, yCurrent + 1 )
+                    gCost( xCurrent + 1, yCurrent + 1 ) = 707 + g( xCurrent, yCurrent);
+                    fCost( xCurrent + 1, yCurrent + 1 ) = gCost( xCurrent + 1, yCurrent + 1 ) + hCost( xCurrent + 1, yCurrent + 1 );
+                    parent( xCurrent + 1, yCurrent + 1, 1 ) = xCurrent;
+                    parent( xCurrent + 1, yCurrent + 1, 2 ) = yCurrent;
+                end
+            end
+        end
+    end
+    fCostMin = max( max( OPEN ) ); % Initialise the minimum f cost
+    for x = 1:iterators(1)
+        for y = 1:iterators(2)
+            if ~OPEN( x, y ) && fCostMin >  fCost( x, y )
+                fCostMin = fCost( x, y );
+                xCurrent = x;
+                yCurrent = y;
+                OPEN( x, y ) = 0;
+                CLOSED( x, y ) = 1;
+            end
+        end
+    end
+    
+    if xCurrent == xTarget && yCurrent == yTarget % Path has been found
+        finish = 0;
+    end
+%     for x = 1:iterators(1)
+%         for y = 1:iterators(2)
+%             if OPEN( x, y ) && ( fCost > f( x, y ) ) % Current = node in OPEN with the lowest fCost
+%                 fCost = f( x, y );
+%                 xCurrent = x;
+%                 yCurrent = y;
+%                 OPEN( x, y ) = 0; % Remove current from OPEN
+%                 CLOSED( x, y ) = 1; % Add current to CLOSED
+%             end
+%         end
+%     end
+%     
+%     if xCurrent == xTarget && yCurrent == yTarget
+%         finish = 0;
+%     end
+%     OPEN( xStart, yStart ) = 1; % Add the start node to OPEN
+end
+
+path = [];
+path( 1, 1 ) = xTarget;
+path( 1, 2 ) = yTarget;
+xPath = parent( xTarget, yTarget, 1 );
+yPath = parent( xTarget, yTarget, 2 );
+
+while ~parent( xPath, yPath, 1 )
+    path( 1, 1 ) = xPath;
+    path( 1, 2 ) = yPath;
+    xPath = parent( xPath, yPath, 1 );
+    yPath = parent( xPath, yPath, 2 );
+end
+
+pathDim = size( path, 1 );
+start2Target = zeros( pathDim, 2 );
+for i = 1:size( path, 1 )
+    start2Target( i, 1 ) = path( pathDim - i + 1, 1 );
+    start2Target( i, 2 ) = path( pathDim - i + 1, 2 );
+end
+start2Target
